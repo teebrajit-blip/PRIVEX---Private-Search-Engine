@@ -1,0 +1,34 @@
+{
+  "documents": [
+    {
+      "id": 1,
+      "url": "https://privex.local/docs/intro",
+      "title": "Introduction to PRIVEX Search Engine",
+      "body": "PRIVEX is an independent, privacy-first search engine built from scratch in Go. It implements an inverted index with BM25 ranking, positional postings, and two-plane architecture decoupling ingestion from query serving."
+    },
+    {
+      "id": 2,
+      "url": "https://privex.local/docs/bm25",
+      "title": "BM25 and BM25F Ranking Explained",
+      "body": "Okapi BM25 is a non-linear term saturation ranking algorithm based on the Robertson-Spärck Jones probabilistic retrieval model. BM25F extends this by weighting multiple fields such as title, headings, and body text before saturation."
+    },
+    {
+      "id": 3,
+      "url": "https://privex.local/docs/privacy",
+      "title": "Privacy and Security Architecture",
+      "body": "PRIVEX guarantees that user query strings are never written to access logs. Outbound search result clicks use direct links with rel noopener noreferrer to eliminate Referer leaks, and third-party trackers or external AI APIs are strictly excluded."
+    },
+    {
+      "id": 4,
+      "url": "https://privex.local/docs/segments",
+      "title": "Immutable On-Disk Segment Storage",
+      "body": "The serving plane queries immutable on-disk index segments without locks. Segments use delta encoding and varint compression for DocIDs, and background compaction periodically merges segments to purge tombstoned documents."
+    },
+    {
+      "id": 5,
+      "url": "https://privex.local/docs/crawler",
+      "title": "Polite Web Crawler and Frontier",
+      "body": "The crawler frontier maintains per-host queues with polite rate limiting and honors robots.txt directives. Built-in SSRF guards resolve DNS to block loopback, private, and cloud metadata IP ranges on every request and redirect."
+    }
+  ]
+}

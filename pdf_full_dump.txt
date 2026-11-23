@@ -1,0 +1,844 @@
+=== PAGE 1 ===
+PRIVEX — Corrected Architecture & 
+Development Plan (v2)
+A review of the original roadmap, the errors found, and a redesigned, build-ready plan.
+1. Verdict
+The original plan has a solid skeleton: build the core (index + BM25) from scratch, go
+incrementally, and treat privacy as architecture. Keep all three ideas. However, it has real
+problems that would hurt you during implementation:
+The architecture is drawn as one straight line, but a search engine has two separate
+paths (offline ingestion and online querying).
+Several technical details are wrong or incomplete (URL normalization, stop words vs
+phrase search, IDF formula, score combination, evaluation metrics).
+The privacy design has gaps that contradict its own promise (query strings in logs,
+Referer leakage, a third-party AI API).
+The roadmap contradicts itself (Milestone 1 says start with the index, the phases say
+start with the crawler), and the 10-week timeline is optimistic.
+Scope option A ("crawl the public internet") is unrealistic for one person.
+2. Corrections to the Original Plan
+#
+Original
+Problem
+Correction
+1
+Linear pipeline diagram:
+Internet → Crawler → …
+→ User
+Mixes two independent
+flows. Users never wait
+on the crawler. Also
+places "Database"
+between index and
+search engine.
+Two planes: Ingestion plane
+(offline, batch) and Serving
+plane (online, read-only).
+They meet at immutable
+index segments. See section
+4.
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 1 of 16
+
+
+=== PAGE 2 ===
+#
+Original
+Problem
+Correction
+2
+/page and /page/ are
+the same URL
+Not guaranteed. Paths
+are case- and slash-
+sensitive; only
+scheme/host case is
+safe.
+Normalize conservatively:
+lowercase scheme+host,
+drop fragments and default
+ports, resolve relative URLs,
+sort query params, strip
+known tracking params
+( utm_* , fbclid ). Trust
+rel=canonical and content
+hashes for the rest.
+3
+SHA-256 for duplicate
+detection
+Catches only byte-
+identical content. Raw
+HTML differs by
+timestamps, ads, CSRF
+tokens.
+Hash the extracted main
+text, not raw HTML. Add
+SimHash (64-bit) for near-
+duplicates in v2.
+4
+http.Get(url) as basis
+Default client has no
+timeout; no size cap; no
+User-Agent.
+Custom http.Client with
+timeouts, io.LimitReader
+(e.g. 2 MB), max 5 redirects,
+content-type allowlist,
+descriptive User-Agent with
+contact URL, charset
+conversion to UTF-8.
+5
+Stop-word removal in the
+pipeline, plus phrase
+search later
+Contradiction. Removing
+stop words shifts
+positions and breaks
+phrases ("to be or not to
+be", "The Who", "how
+to").
+Index every token with its
+original position. Never
+delete stop words at index
+time. Down-weight them
+naturally via IDF, and
+optionally skip them only
+when scoring long queries.
+6
+Lemmatization ("Better
+→ Good") as Advanced
+Needs POS tagging and
+a lexicon; poor Go
+support; low payoff.
+Use a Snowball/Porter
+stemmer for English only.
+Drop lemmatization from the
+plan.
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 2 of 16
+
+
+=== PAGE 3 ===
+#
+Original
+Problem
+Correction
+7
+Tokenize "into words"
+Whitespace/ASCII
+splitting fails for Unicode
+(e.g. Bengali, Hindi,
+Assamese, CJK).
+Unicode-aware analyzer:
+NFKC normalization
+( golang.org/x/text ), split
+on non-letter/digit, language
+detection per document,
+stemmer only where a
+language is supported. Same
+analyzer at index and query
+time.
+8
+Index map[string]
+[]Posting
+Fine for a prototype, but:
+not concurrency-safe,
+DocID int mismatches
+BIGSERIAL , Frequency
+duplicates
+len(Positions) ,
+postings must be sorted
+by DocID for fast
+intersection. Memory-
+only is fragile.
+Define an on-disk segment
+format from the start
+(section 5.4). Keep the in-
+memory map only as the
+write buffer.
+9
+TF = f / total terms ,
+IDF = log(N/DF)
+IDF is 0 for terms in
+every document and
+undefined if DF = 0. Raw
+log(N/DF) is not the
+standard BM25 IDF.
+Use idf = ln(1 + (N − n
++ 0.5)/(n + 0.5)) (always
+positive).
+10
+Score = 0.65·BM25 +
+0.15·Title +
+0.10·Fresh +
+0.10·Link
+BM25 is unbounded;
+other signals are 0–1. The
+weights are meaningless
+without normalization.
+Freshness helps only
+some queries.
+Use BM25F (fields weighted
+inside BM25: title, headings,
+body, URL, anchor text),
+then apply small normalized
+boosts. Tune on a judged
+query set.
+11
+Link authority /
+PageRank / domain
+quality early
+PageRank on a small
+focused crawl is noisy.
+"Domain quality" is
+undefined.
+Defer to v2. Store the link
+graph from day one so it is
+possible later.
+12
+Missing link-graph table
+You list link signals but
+never store links.
+Add links table (src, dst,
+anchor text).
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 3 of 16
+
+
+=== PAGE 4 ===
+#
+Original
+Problem
+Correction
+13
+Precision/Recall/F1
+Recall is not computable
+on an open web. F1
+ignores rank order.
+Use judged queries with
+graded relevance and report
+nDCG@10, MRR, P@10,
+MAP, plus latency
+percentiles.
+14
+"Avoid Elasticsearch"
+Right for building, but
+wastes a great test
+oracle.
+Use Lucene/Elasticsearch or
+Pyserini only as a reference
+to validate that your BM25
+rankings roughly match.
+15
+Gemini API for AI
+summaries
+Sends user queries and
+page text to a third
+party. Breaks the privacy
+promise.
+Local/self-hosted models
+only (embedding model via
+ONNX/Ollama), or an explicit
+opt-in toggle with a visible
+warning.
+16
+GET /api/search?q=...
+Query strings end up in
+reverse-proxy/access
+logs and browser history,
+and result clicks leak the
+query via the Referer
+header.
+Scrub query strings from
+logs, set Referrer-Policy:
+no-referrer , use
+rel="noreferrer
+noopener" and direct (non-
+redirect) result links.
+17
+Autocomplete from
+"popular searches"
+(implied)
+Requires storing queries.
+Build suggestions from
+indexed
+titles/headings/terms only
+(trie or FST).
+18
+crawl_queue table with
+status
+Multiple workers will
+grab the same row. No
+per-host politeness.
+Lease-based claiming with
+SELECT … FOR UPDATE SKIP
+LOCKED , plus per-host back-
+queues in the frontier.
+19
+Two files named
+normalizer.go
+Name clash/confusion
+(URL vs text).
+Rename: urlnorm and
+analysis .
+20
+"Seven systems" vs nine
+modules; Phase order vs
+Milestone 1
+Inconsistent.
+Single component list and
+one milestone order
+(sections 4 and 10).
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 4 of 16
+
+
+=== PAGE 5 ===
+3. Scope, Goals and Non-Goals
+Vision. An independent search engine over a curated set of sites, with transparent
+ranking and minimal data collection.
+Scope decision (recommended).
+v1: Focused public-web crawl (e.g. programming documentation, selected blogs,
+Wikipedia subset) plus a static corpus for testing.
+v2: Add private documents (PDF, Markdown, text) as a second source type = hybrid
+search.
+Non-goals for v1: web-scale crawling, JavaScript rendering, personalization, ads,
+accounts.
+Honest limitation to document: pages that need JavaScript to show content will be
+extracted poorly. Say so in the README rather than hiding it.
+Naming. Check that "PRIVEX" does not clash with an existing company or product before
+you publish. I believe a hosting provider uses a similar name, so verify.
+4. Revised Architecture
+The system has two planes connected by a shared index store.
+#
+Original
+Problem
+Correction
+21
+100–500 test pages; 10–12
+week plan
+Too few documents to
+evaluate ranking;
+schedule ignores
+learning Go.
+Start with 10k–100k
+documents from a public
+corpus; 16-week plan.
+22
+Scope A: crawl the public
+internet
+Not feasible alone
+(storage, bandwidth,
+politeness, spam).
+Focused crawl of a chosen
+set of domains (≈10⁵–10⁶
+pages).
+23
+No crawler security
+Seed URLs and redirects
+can point at internal
+addresses (SSRF), and
+compressed responses
+can be bombs.
+Block private/loopback/link-
+local IPs after DNS
+resolution, cap
+decompressed size, cap
+redirects.
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 5 of 16
+
+
+=== PAGE 6 ===
+INGESTION PLANE (offline, can be slow, can fail and retry)
+ Seeds/Sitemaps --> URL FRONTIER --> FETCHER --> EXTRACTOR --> ANALYZER
+                     (priority +     (robots,     (clean text,    (tokens +
+                      per-host        limits,      links, meta)    positions)
+                      queues)         SSRF guard)       |             |
+                          ^                             v             v
+                          |                      PostgreSQL     INDEX BUILDER
+                          +---- discovered links --- (docs, links, (writes 
+immutable
+                                                      crawl state)  segments)
+                                                            |
+ SERVING PLANE (online, read-only, fast)                    v
+                                                    INDEX SEGMENTS (disk)
+                                                            |
+ User --> HTTPS --> API --> QUERY PARSER --> SEARCHER <------+
+                             (same analyzer)   (retrieval + BM25F + top-k 
+heap)
+                                                    |
+                                          SNIPPETS (fetch top-k text from 
+PostgreSQL)
+                                                    |
+                                               JSON --> FRONTEND
+Components (final list)
+1. Frontier & Scheduler: priorities, per-host queues, recrawl policy.
+2. Fetcher: robots.txt, rate limits, conditional GET, safety limits.
+3. Extractor: HTML → structured document, link extraction, canonical URL.
+4. Analyzer: Unicode-aware tokenizer, normalizer, optional stemmer. Shared by indexer
+and query parser.
+5. Index Builder & Segment Store: immutable segments, merging, tombstones.
+6. Searcher & Ranker: retrieval, BM25F, boosts, top-k.
+7. Query Processor: parsing (terms, phrases, boolean), validation, spell suggestions.
+8. Snippet Generator: highlights from stored text.
+9. API: REST, pagination, rate limiting.
+10. Frontend: static HTML/CSS/JS.
+11. Evaluation Harness: judged queries, metrics, benchmarks.
+Key design rules
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 6 of 16
+
+
+=== PAGE 7 ===
+Search nodes never write to the index. They load immutable segments, so reads need
+no locks. Index updates swap in a new segment set atomically.
+The analyzer is a single package used on both sides. Index/query analyzer mismatch is
+the most common cause of "missing" results.
+PostgreSQL holds documents, crawl state and links. The index holds the term →
+postings structure. Never query Postgres full-text search for ranking.
+5. Component Designs
+5.1 Crawler (Frontier + Fetcher)
+Frontier (Mercator-style)
+Front queues by priority (seed depth, sitemap hint, freshness need).
+Back queues, one per host, each with a "next allowed fetch time".
+A worker pool pulls from whichever host is ready, so one slow site cannot stall
+everything.
+Persist state in PostgreSQL with lease claiming ( FOR UPDATE SKIP LOCKED ,
+lease_expires_at ) so crashes do not lose work.
+Fetcher rules
+Identify yourself in the User-Agent and honor robots.txt (RFC 9309): cache per
+host, treat 5xx as "temporarily disallow", respect Crawl-delay and use Sitemap:
+entries.
+Default politeness: at most one request per host per second or the declared delay,
+and a small per-host concurrency (1–2).
+Use conditional requests ( ETag , If-Modified-Since ) for recrawls.
+Limits: connect/response timeouts, max body size, max redirects, content-type
+allowlist ( text/html , later application/pdf ).
+Spider-trap protection: max depth, max URLs per host, ignore calendar/session-ID
+URL patterns, cap URL length.
+SSRF protection: after DNS resolution, reject loopback, private, link-local and
+metadata addresses; re-check on every redirect.
+Bounded worker pools with context cancellation and graceful shutdown.
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 7 of 16
+
+
+=== PAGE 8 ===
+5.2 Extraction
+Decode charset to UTF-8 ( golang.org/x/net/html/charset ).
+With goquery / x/net/html : remove script , style , noscript , template , nav ,
+footer , aside ; collect title , meta description , h1–h3 , body text (join text
+nodes with spaces so words do not fuse), links with anchor text, rel=canonical ,
+lang .
+Main-content heuristic: prefer <main> / <article> ; fall back to text-density scoring.
+Output a Document struct with separate fields: title , headings , body ,
+url_tokens , anchor_text (from inbound links, added later), plus content_hash of
+normalized body text and fetched_at .
+Respect <meta name="robots" content="noindex,nofollow"> and X-Robots-Tag .
+5.3 Analyzer
+Pipeline (applied identically at index and query time):
+1. Unicode NFKC normalization and lowercasing.
+2. Tokenize on non-letter/non-digit boundaries (keep things like c++ , go1.22 via a small
+exception list or a bigram fallback).
+3. Record position of every token (before any filtering).
+4. Optional stemming (English Snowball) stored as the indexed form; keep the
+unstemmed form only if you want exact-match boosts.
+5. Stop words are not removed from the index. At query time, drop them only when the
+query has enough other terms and no phrase quotes.
+5.4 Index and Segment Format
+In-memory write buffer
+type Posting struct {
+    DocID     uint32
+    Positions []uint32 // field-tagged positions; tf = len(Positions)
+}
+// term -> postings sorted by DocID (appended in increasing DocID order)
+Immutable on-disk segment
+Term dictionary: sorted terms → (document frequency, postings offset). Start with a
+sorted file plus binary search; move to an FST later.
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 8 of 16
+
+
+=== PAGE 9 ===
+Postings file: delta-encoded DocIDs, varint-compressed, with term frequency and
+per-field positions. Add skip pointers for long lists later.
+Document table: internal DocID → external ID, field lengths (title/headings/body),
+total length.
+Tombstone bitmap: deleted/replaced documents.
+Segment merge: periodically merge small segments (LSM idea) and drop tombstoned
+docs.
+Global statistics: N, per-field average lengths, per-term DF (summed across
+segments) are required for correct BM25.
+Use uint32 internal DocIDs mapped to Postgres BIGINT IDs, which halves memory.
+Query algorithms
+AND: intersect posting lists, shortest first.
+Phrase: intersect docs, then check positions with offsets ( pos(t2) = pos(t1)+1 ).
+Boolean: AND/OR/NOT through set operations on sorted lists.
+Top-k: min-heap of size k; later optimize with WAND/MaxScore.
+Default query semantics: try all terms (AND); if fewer than a threshold results, relax
+to OR with a coordination boost. State this explicitly in your design doc.
+5.5 Ranking
+Stage 1 (learning exercise): TF-IDF with tf = 1 + ln(f) and idf = ln(N/df) guarded
+against zero.
+Stage 2 (production baseline): BM25
+idf(t)   = ln(1 + (N - n_t + 0.5) / (n_t + 0.5))
+score    = sum over query terms t of
+           idf(t) * f * (k1 + 1) / (f + k1 * (1 - b + b * |d| / avgdl))
+start with k1 = 1.2, b = 0.75 (tune in 1.2–2.0)
+Stage 3: BM25F (fields)
+tf~(t,d) = sum over fields F of  w_F * tf_F / (1 - b_F + b_F * len_F / 
+avglen_F)
+score    = sum over t of idf(t) * tf~ * (k1 + 1) / (k1 + tf~)
+initial weights: title 3.0, headings 2.0, anchor 2.0, url 1.5, body 1.0
+Stage 4: extra signals (after evaluation harness exists)
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 9 of 16
+
+
+=== PAGE 10 ===
+Proximity boost (query terms close together).
+Exact-phrase boost.
+Light freshness boost, only for time-sensitive queries.
+Link-based prior (PageRank-style) once the crawl is large enough.
+Penalties: thin content, near-duplicates, excessive per-domain results (cap 2–3 per
+domain on page 1).
+Combine with documented, normalized boosts. Every added signal must improve
+nDCG on your judged set or it is removed.
+5.6 Search API
+The standard library net/http (Go 1.22+ routing) is enough; Gin is optional. Pick one
+and stay consistent.
+Use pgx for PostgreSQL and golang-migrate for migrations; log/slog for logging.
+Return total_results as an estimate; support cursor/offset pagination capped at a
+sensible depth.
+Snippets: choose the best window of the stored body containing query terms; HTML-
+escape everything, then add <mark> tags yourself (prevents XSS).
+Add timeouts, request body limits, in-memory rate limiting, and a result cache keyed
+by normalized query (memory only, short TTL, never persisted).
+5.7 Frontend
+Static HTML/CSS/vanilla JS served with go:embed so the whole product is one binary. No
+third-party scripts, fonts or analytics. Works without JavaScript for the basic search (a
+plain <form method="GET"> ). Dark mode via prefers-color-scheme . Add a Content-
+Endpoint
+Method
+Notes
+/api/search
+GET
+q , page , lang , site . Validate length (e.g. ≤ 256
+chars), max page.
+/api/suggest
+GET
+From indexed vocabulary/titles only.
+/api/document/:id
+GET
+Metadata only; no cached copies (copyright).
+/api/stats
+GET
+Aggregate index statistics only.
+/healthz
+GET
+Liveness/readiness.
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 10 of 16
+
+
+=== PAGE 11 ===
+Security-Policy that blocks external resources.
+6. Data Model (PostgreSQL)
+Use TIMESTAMPTZ everywhere, and unique indexes on hashed URLs.
+Table crawl_queue from the original is merged into urls (one row per URL with state),
+and index_metadata is split into index_segments plus index_state .
+7. Privacy and Security Design
+What you can honestly promise: queries are not stored, no profiles, no third-party
+trackers, minimal logs. What you cannot promise: that no information is ever processed.
+Your host, ISP and TLS endpoint still see connections.
+Table
+Key columns
+domains
+id, host (unique), robots_txt, robots_fetched_at,
+crawl_delay_ms, status, last_fetch_at, page_count
+urls
+id BIGINT, domain_id, url, url_hash (unique),
+canonical_url_id, status
+( pending/leased/done/failed/blocked ), priority,
+depth, retry_count, lease_expires_at,
+next_fetch_at, etag, last_modified
+documents
+id BIGINT, url_id, title, description, headings, body,
+lang, word_count, content_hash, simhash,
+fetched_at, indexed_at, deleted
+links
+src_doc_id, dst_url_id, anchor_text (index both
+directions)
+fetch_log
+url_id, status_code, response_ms, bytes, error,
+fetched_at (retain briefly, e.g. 30 days)
+index_segments
+id, path, doc_count, created_at, state
+( building/live/merged )
+index_state
+live segment set version, N, per-field average
+lengths
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 11 of 16
+
+
+=== PAGE 12 ===
+Risk
+Mitigation
+Queries in access logs
+Disable or scrub query strings; log only method,
+status, latency bucket.
+IP addresses in logs
+Do not log IPs. Reverse proxies (nginx/Caddy) log
+them by default, so turn that off. Rate-limit using
+in-memory counters keyed by a salted hash, with
+the salt rotated frequently and never persisted.
+Query leak via Referer to result sites
+Referrer-Policy: no-referrer and
+rel="noreferrer noopener" .
+Click tracking
+None. Direct links, no redirect wrapper.
+Autocomplete leakage
+Suggestions from index data only; debounce
+requests.
+Third-party calls
+No CDNs, fonts, analytics or external AI APIs. Self-
+host assets.
+Cookies / storage
+None by default. Preferences (dark mode) via local
+storage on the client only.
+Analytics
+Aggregate counters only (total queries/day,
+latency histograms), never per-query records.
+Query result cache
+Memory-only, short TTL, never written to disk.
+Injection and XSS
+Parameterized SQL, strict output escaping, CSP.
+Crawler abuse
+SSRF guard, size limits, robots compliance,
+identifiable User-Agent, contact address.
+Admin endpoints
+Separate port, authentication, not exposed
+publicly.
+Legal
+Do not serve cached page copies; keep snippets
+short; provide a removal/opt-out contact; review
+applicable data-protection law (e.g. India's DPDP
+Act) if you operate publicly.
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 12 of 16
+
+
+=== PAGE 13 ===
+8. Evaluation Plan
+1. Correctness tests: unit tests for tokenizer, URL normalizer, posting-list intersection,
+phrase matching, varint encoding, BM25 scores (hand-computed examples).
+2. Reference check: index the same corpus in Lucene/Elasticsearch or Pyserini and
+compare top-10 overlap for 50+ queries. Small differences are expected; large ones
+signal a bug.
+3. Judged query set: 50–100 queries with graded relevance (0–3) for the top results of
+each system variant (pooling). Public corpora such as Wikipedia dumps, MS MARCO,
+or BEIR datasets give you ready judgments.
+4. Metrics: nDCG@10 (primary), MRR, P@10, MAP.
+5. Performance: p50/p95/p99 latency, queries/second, index size vs raw text, memory
+use, indexing throughput (docs/sec), crawl throughput.
+6. Regression rule: each ranking change is accepted only if nDCG@10 does not drop.
+7. Always report numbers you measured with the corpus size, never targets as results.
+9. Revised Project Structure
+privex/
+├── cmd/
+│   ├── crawler/        # ingestion worker
+│   ├── indexer/        # builds/merges segments
+│   ├── server/         # serving plane
+│   └── evaltool/       # benchmarks and metrics
+├── internal/
+│   ├── config/
+│   ├── frontier/       # queues, scheduling, politeness
+│   ├── fetcher/        # http client, robots, ssrf guard
+│   ├── urlnorm/
+│   ├── extractor/      # html -> Document
+│   ├── analysis/       # tokenizer, normalizer, stemmer, stopwords
+│   ├── index/          # buffer, segment writer/reader, merger
+│   ├── ranking/        # tfidf, bm25, bm25f, boosts
+│   ├── query/          # parser, planner (phrase/boolean)
+│   ├── snippet/
+│   ├── linkgraph/      # links storage, PageRank (v2)
+│   ├── store/          # postgres access (pgx)
+│   ├── api/
+│   └── eval/
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 13 of 16
+
+
+=== PAGE 14 ===
+├── web/                # embedded frontend
+├── migrations/
+├── testdata/           # small fixtures and judged queries
+├── deployments/        # Dockerfile, docker-compose.yml
+├── docs/               # design notes, decisions (ADRs)
+├── go.mod
+└── README.md
+Go convention is _test.go files next to the code, so the separate tests/ folder is
+replaced by testdata/ plus in-package tests.
+10. Revised Roadmap (16 Weeks to v1.0)
+Order principle: build the retrieval core first on a static corpus, then add the crawler.
+This removes the contradiction in the original and lets you validate ranking before
+network complexity appears.
+Milestone
+Weeks
+Work
+Exit criteria
+M0 Foundations
+1
+Go tooling, modules,
+goroutines/channels basics, repo,
+CI ( go test , go vet ), Postgres
+in Docker
+Hello-world service,
+one passing test, CI
+green
+M1 Retrieval core
+(in memory)
+2–4
+Analyzer, in-memory inverted
+index with positions, TF-IDF then
+BM25, CLI search over a 10k–50k
+document static corpus (e.g.
+Wikipedia subset)
+CLI returns ranked
+results; unit tests pass;
+BM25 matches hand-
+computed examples
+M2 Evaluation
+harness
+5
+Judged queries,
+nDCG/MRR/P@10, reference
+comparison with Lucene/Pyserini
+Baseline metrics
+recorded for TF-IDF vs
+BM25
+M3 Query
+features +
+persistence
+6–8
+Segment writer/reader,
+varint/delta compression, phrase
+and boolean queries, tombstones,
+merge
+Restart keeps index;
+phrase queries correct;
+memory and index size
+measured
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 14 of 16
+
+
+=== PAGE 15 ===
+v2.0 (after v1): autocomplete (trie/FST), spell correction (SymSpell-style edit distance
+over index vocabulary), SimHash near-duplicates, link graph + PageRank-style prior,
+PDF/private-document ingestion (hybrid), semantic search with local embeddings stored
+in pgvector and merged with BM25 via Reciprocal Rank Fusion, optional local-model
+summaries.
+v3.0 (later): distributed crawling workers, multi-node search with sharded segments,
+WAND/MaxScore optimization, index replication, fault tolerance, evaluation dashboard.
+Milestone
+Weeks
+Work
+Exit criteria
+M4 Extraction +
+crawler
+9–11
+Extractor
+(title/headings/body/links), URL
+normalizer, frontier with per-host
+queues, robots, fetcher with
+limits and SSRF guard, Postgres
+urls / documents / links
+Crawls a focused set of
+~10k pages politely;
+resumable after crash
+M5 Pipeline
+integration
+12
+Indexer reads documents from
+Postgres and builds segments,
+near-live segment swap, exact-
+duplicate removal
+End-to-end: seed URLs
+→ searchable index
+M6 API + frontend
+13
+Search/suggest endpoints,
+snippets, pagination, embedded
+UI, rate limiting
+Usable search UI, p95
+latency measured
+M7 Ranking
+quality
+14
+BM25F, proximity/phrase boosts,
+per-domain result caps, tune on
+judged set
+nDCG@10 improves
+over BM25 baseline
+with documented
+weights
+M8 Privacy,
+hardening,
+deployment
+15–16
+Log scrubbing, CSP, headers,
+HTTPS, Docker, monitoring
+(aggregate only), security
+checklist, README with honest
+privacy statement and limits
+Deployed instance;
+privacy checklist
+(section 7) fully ticked
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 15 of 16
+
+
+=== PAGE 16 ===
+11. Main Risks and Mitigations
+12. Decisions Needed Before Starting
+1. Scope: confirm v1 = focused public-web crawl (recommended), with private-
+document search in v2.
+2. Language of content: English only first, or multilingual from the start (affects
+analyzer and stemmer).
+3. HTTP layer: standard library net/http (recommended) or Gin.
+4. Test corpus: Wikipedia subset (recommended), or your own domain list.
+5. Target index size for v1: 10⁴, 10⁵ or 10⁶ documents (drives hardware and storage
+choices).
+13. Recommended First Step
+Start M1 this week: implement the analyzer, an in-memory positional inverted index, and
+BM25, then search a folder of text files from the terminal. Do not touch the crawler,
+database or frontend until M1 and M2 exit criteria are met.
+Risk
+Mitigation
+Scope creep into AI/distributed
+features
+Lock v1 scope to M0–M8; defer everything else to
+v2/v3.
+Crawler gets blocked or harms sites
+Strict politeness defaults, contact info in User-
+Agent, small focused domain list.
+Poor ranking with no way to know
+Evaluation harness at M2, before any tuning.
+Index too large for memory
+Segment format with compression in M3 rather
+than a late rewrite.
+Low-quality text extraction
+Fixture set of real pages; compare extraction
+output manually; log extraction length ratios.
+Privacy claims drifting from reality
+Keep a living threat-model table; test by grepping
+logs for query strings and IPs.
+Learning Go while building
+Keep M1 intentionally small; write tests first for
+algorithms.
+PRIVEX — Corrected Architecture & Development Plan (v2)
+Page 16 of 16
+
+
