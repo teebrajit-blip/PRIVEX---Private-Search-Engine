@@ -3,6 +3,8 @@ package analysis
 import (
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Standard English stop words
@@ -65,6 +67,7 @@ func DefaultAnalyzer() *Analyzer {
 
 // Normalize lowercases and normalizes whitespace/runes.
 func (a *Analyzer) Normalize(s string) string {
+	s = norm.NFKC.String(s)
 	return strings.ToLower(strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return ' '

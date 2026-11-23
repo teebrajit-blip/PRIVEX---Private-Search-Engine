@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PRIVEX</title>
+  <style>
+    :root { color-scheme: light dark; --fg:#1c2733; --bg:#f7f9fb; --card:#fff; --accent:#3a5ee8; }
+    @media (prefers-color-scheme: dark) { :root { --fg:#edf2f7; --bg:#111827; --card:#1f2937; --accent:#8aa2ff; } }
+    body { margin:0; font:16px system-ui,sans-serif; color:var(--fg); background:var(--bg); }
+    main { max-width:780px; margin:0 auto; padding:48px 20px; }
+    h1 { margin:0 0 24px; }
+    form { display:flex; gap:8px; }
+    input { flex:1; min-width:0; padding:12px 14px; border:1px solid #8896a6; border-radius:8px; background:var(--card); color:var(--fg); }
+    button { padding:12px 18px; border:0; border-radius:8px; background:var(--accent); color:white; cursor:pointer; }
+    #results { margin-top:24px; }
+    article { margin:18px 0; }
+    article a { color:var(--accent); font-size:1.1rem; }
+    article p { margin:6px 0; line-height:1.45; }
+    mark { background:#ffe48a; color:#111827; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>PRIVEX</h1>
+  <form method="GET" action="/api/search">
+    <input name="q" maxlength="256" aria-label="Search" required>
+    <button type="submit">Search</button>
+  </form>
+  <noscript><p>Enter a query and submit to view JSON search results.</p></noscript>
+  <section id="results"></section>
+</main>
+<script>
+const form = document.querySelector("form");
+const results = document.querySelector("#results");
+form.addEventListener("submit", async event => {
+  event.preventDefault();
+  const q = new URLSearchParams(new FormData(form)).get("q");
+  history.replaceState({}, "", "/");
+  results.textContent = "Searching...";
+  try {
+    const response = await fetch("/api/search?q=" + encodeURIComponent(q));
+    const data = await response.json();
+    results.replaceChildren();
+    if (!data.results.length) { results.textContent = "No matching documents found."; return; }
+    for (const result of data.results) {
+      const article = document.createElement("article");
+      const link = document.createElement("a");
+      link.href = result.url; link.rel = "noreferrer noopener"; link.target = "_blank"; link.textContent = result.title;
+      const excerpt = document.createElement("p"); excerpt.textContent = result.snippet;
+      article.append(link, excerpt); results.append(article);
+    }
+  } catch (_) { results.textContent = "Search unavailable."; }
+});
+</script>
+</body>
+</html>

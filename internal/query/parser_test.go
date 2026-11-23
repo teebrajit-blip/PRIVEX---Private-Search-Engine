@@ -21,7 +21,7 @@ func TestParseTermsAndPhrases(t *testing.T) {
 		t.Fatalf("expected 2 phrases, got %d", len(q.Phrases))
 	}
 
-	expectedPhrase1 := []string{"open", "sourc"} // stemmed
+	expectedPhrase1 := []string{"open", "sourc"}   // stemmed
 	expectedPhrase2 := []string{"fast", "retriev"} // stemmed
 	if !reflect.DeepEqual(q.Phrases[0], expectedPhrase1) {
 		t.Errorf("phrase 1 mismatch: got %v, want %v", q.Phrases[0], expectedPhrase1)

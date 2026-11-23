@@ -15,6 +15,39 @@ type MemoryIndex struct {
 	nextDocID   uint32
 }
 
+// GetAllDocuments returns a snapshot of indexed document metadata.
+func (idx *MemoryIndex) GetAllDocuments() []Document {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	docs := make([]Document, 0, len(idx.docs))
+	for _, doc := range idx.docs {
+		docs = append(docs, doc)
+	}
+	return docs
+}
+
+// TermCount returns the number of distinct indexed terms.
+func (idx *MemoryIndex) TermCount() int {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return len(idx.postings)
+}
+
+// ListTerms returns distinct terms in lexical order.
+func (idx *MemoryIndex) ListTerms(limit int) []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	terms := make([]string, 0, len(idx.postings))
+	for term := range idx.postings {
+		terms = append(terms, term)
+	}
+	sort.Strings(terms)
+	if len(terms) > limit {
+		terms = terms[:limit]
+	}
+	return terms
+}
+
 // NewMemoryIndex initializes an empty in-memory index.
 func NewMemoryIndex() *MemoryIndex {
 	return &MemoryIndex{

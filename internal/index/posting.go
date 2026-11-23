@@ -20,11 +20,11 @@ type FieldLengths struct {
 
 // Document represents an indexed document and its stored metadata.
 type Document struct {
-	DocID        uint32
-	ExternalID   int64  // Maps to PostgreSQL BIGINT
-	URL          string
-	Title        string
-	Snippet      string
-	Lengths      FieldLengths
-	TotalLength  uint32
+	DocID       uint32
+	ExternalID  int64 // Maps to PostgreSQL BIGINT
+	URL         string
+	Title       string
+	Snippet     string
+	Lengths     FieldLengths
+	TotalLength uint32
 }

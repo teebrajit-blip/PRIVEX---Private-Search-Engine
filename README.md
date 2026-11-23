@@ -98,3 +98,23 @@ go run ./cmd/privex-cli
 go run ./cmd/privex-cli -query "privacy architecture"
 go run ./cmd/privex-cli -query "\"bm25 ranking\""
 ```
+
+### 4. Running the HTTP Server
+```bash
+go run ./cmd/privex-server -addr :8080
+# open http://127.0.0.1:8080
+```
+
+Docker:
+```bash
+docker compose -f deployments/docker-compose.yml up --build
+```
+
+### Honest Current Status
+
+The retrieval core, static-corpus server, embedded frontend, PostgreSQL schema, segment
+format, extractor, URL normalizer, fetcher safety guard, frontier, evaluation package,
+and Docker packaging are implemented. A public crawler and live PostgreSQL ingestion
+pipeline require real seed-domain configuration and database credentials before
+deployment. JavaScript-heavy pages are extracted incompletely. The project makes no
+claim of web-scale coverage and does not send queries or documents to third-party APIs.

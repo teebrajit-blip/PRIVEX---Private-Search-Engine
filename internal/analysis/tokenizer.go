@@ -24,7 +24,7 @@ func isAlphanumeric(r rune) bool {
 		(r >= 0x0370 && r <= 0x03FF) || // Greek
 		(r >= 0x0400 && r <= 0x04FF) || // Cyrillic
 		(r >= 0x0900 && r <= 0x0D7F) || // Indic scripts (Devanagari, Bengali, etc.)
-		(r >= 0x4E00 && r <= 0x9FFF)    // CJK unified ideographs
+		(r >= 0x4E00 && r <= 0x9FFF) // CJK unified ideographs
 }
 
 // Tokenize converts an input string into a slice of Tokens with original sequential positions.

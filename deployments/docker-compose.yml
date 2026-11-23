@@ -1,0 +1,7 @@
+services:
+  privex:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080"
